@@ -37,6 +37,13 @@ import {
   users,
 } from "~/db/schema";
 import { splitRevenue, type AnalyticsRange } from "~/lib/analytics";
+import {
+  approvedRefundOf,
+  getCourseRefundsByCountry,
+  getRefundTotal,
+  getRefundsByBucket,
+  getRefundsByCourse,
+} from "~/lib/refund-revenue.server";
 import { getDiscountForCountry } from "~/lib/ppp";
 import {
   ANALYTICS_RANGES,
@@ -83,13 +90,13 @@ type AnalyticsTab = "overview" | "course";
 
 const chartConfig = {
   grossCents: { label: "Gross revenue", color: "var(--chart-1)" },
-  netCents: { label: "Net earnings", color: "var(--chart-2)" },
+  netCents: { label: "Net revenue", color: "var(--chart-2)" },
 } satisfies ChartConfig;
 
 export function meta() {
   return [
     { title: "Analytics — Cadence" },
-    { name: "description", content: "Revenue and earnings for your courses." },
+    { name: "description", content: "Revenue for your courses." },
   ];
 }
 
@@ -101,6 +108,7 @@ function parseId(value: string | null): number | null {
 
 type RevenueSummary = {
   grossCents: number;
+  refundsCents: number;
   feeCents: number;
   netCents: number;
   purchaseCount: number;
@@ -263,6 +271,8 @@ function getStudentRevenue(
       and(
         inArray(purchases.userId, studentIds),
         notExists(mintedSeats),
+        // A refunded buyer has not paid, whenever the Refund was approved.
+        notExists(approvedRefundOf(purchases.id)),
         ownedBy(instructorId)
       )
     )
@@ -324,7 +334,13 @@ function getTopBuyers(
     .from(purchases)
     .innerJoin(courses, eq(purchases.courseId, courses.id))
     .innerJoin(users, eq(users.id, purchases.userId))
-    .where(purchaseScope(instructorId, range))
+    .where(
+      and(
+        purchaseScope(instructorId, range),
+        // A refunded purchase is not spend, whenever the Refund was approved.
+        notExists(approvedRefundOf(purchases.id))
+      )
+    )
     .groupBy(users.id)
     .orderBy(desc(sum(purchases.amountPaid)))
     .limit(TOP_BUYER_LIMIT)
@@ -453,6 +469,8 @@ function getRevenueOverTime(
   const grossByBucket = new Map(
     rows.map((row) => [row.bucket, Number(row.gross ?? 0)])
   );
+  // Net comes down on the day a Refund was approved, so it can dip below zero.
+  const refundsByBucket = getRefundsByBucket(instructorId, range, granularity);
 
   const now = new Date().toISOString();
   // A fixed range always spans its whole window, even before the first sale;
@@ -465,7 +483,8 @@ function getRevenueOverTime(
     granularity
   ).map((bucket) => {
     const { grossCents, netCents } = splitRevenue(
-      grossByBucket.get(bucket) ?? 0
+      grossByBucket.get(bucket) ?? 0,
+      refundsByBucket.get(bucket) ?? 0
     );
     return { bucket, grossCents, netCents };
   });
@@ -755,6 +774,21 @@ function getCourseRevenueByCountry(
     }))
     .sort((a, b) => b.grossCents - a.grossCents);
 
+  // A country can have Refunds in the range but no sales in it. It still gets
+  // a row, so the rows' net adds up to the total.
+  const refundsByCountry = getCourseRefundsByCountry(courseId, range);
+  for (const country of refundsByCountry.keys()) {
+    if (!rows.some((row) => row.country === country)) {
+      rows.push({ country, grossCents: 0, purchaseCount: 0 });
+    }
+  }
+  const refundsFor = (country: string | null) =>
+    refundsByCountry.get(country) ?? 0;
+  const totalRefundsCents = [...refundsByCountry.values()].reduce(
+    (total, cents) => total + cents,
+    0
+  );
+
   const grossCents = rows.reduce((total, row) => total + row.grossCents, 0);
   const purchaseCount = rows.reduce(
     (total, row) => total + row.purchaseCount,
@@ -765,6 +799,7 @@ function getCourseRevenueByCountry(
     grossCents === 0 ? 0 : Math.round((cents / grossCents) * 100);
 
   let discountedGrossCents = 0;
+  let discountedRefundsCents = 0;
 
   const breakdown = rows.map((row) => {
     const discountPercent =
@@ -772,23 +807,30 @@ function getCourseRevenueByCountry(
 
     if (discountPercent !== null && discountPercent > 0) {
       discountedGrossCents += row.grossCents;
+      discountedRefundsCents += refundsFor(row.country);
     }
 
     return {
       ...row,
-      netCents: splitRevenue(row.grossCents).netCents,
+      netCents: splitRevenue(row.grossCents, refundsFor(row.country)).netCents,
       sharePercent: share(row.grossCents),
-      averagePaidCents: Math.round(row.grossCents / row.purchaseCount),
+      averagePaidCents:
+        row.purchaseCount === 0
+          ? 0
+          : Math.round(row.grossCents / row.purchaseCount),
       discountPercent,
     };
   });
 
   return {
     grossCents,
-    netCents: splitRevenue(grossCents).netCents,
+    netCents: splitRevenue(grossCents, totalRefundsCents).netCents,
     purchaseCount,
     discountedGrossCents,
-    discountedNetCents: splitRevenue(discountedGrossCents).netCents,
+    discountedNetCents: splitRevenue(
+      discountedGrossCents,
+      discountedRefundsCents
+    ).netCents,
     discountedSharePercent: share(discountedGrossCents),
     rows: breakdown,
   };
@@ -885,7 +927,8 @@ export async function loader({ request, url }: Route.LoaderArgs) {
     older: (questionRow?.total ?? 0) - questionsInRange,
   };
 
-  // Gross revenue, the platform's fee and the instructor's net for the range.
+  // Gross Revenue, Refunds, the Platform Fee and the instructor's Net Revenue
+  // for the range. Refunds count on the day they were approved.
   const summaryRow = db
     .select({
       gross: sum(purchases.amountPaid),
@@ -898,12 +941,15 @@ export async function loader({ request, url }: Route.LoaderArgs) {
 
   // sum() returns null over an empty set, and a string when SQLite has rows.
   const summary: RevenueSummary = {
-    ...splitRevenue(Number(summaryRow?.gross ?? 0)),
+    ...splitRevenue(
+      Number(summaryRow?.gross ?? 0),
+      getRefundTotal(instructorId, range)
+    ),
     purchaseCount: summaryRow?.purchaseCount ?? 0,
   };
 
-  // Revenue broken down by course, biggest earner first. Courses with no sales
-  // in the range are absent rather than listed at zero.
+  // Revenue broken down by course, biggest earner first. Courses with neither
+  // sales nor Refunds in the range are absent rather than listed at zero.
   const courseRevenueRows = db
     .select({
       courseId: courses.id,
@@ -917,11 +963,28 @@ export async function loader({ request, url }: Route.LoaderArgs) {
     .groupBy(courses.id)
     .all();
 
-  const courseRevenue = courseRevenueRows
+  const refundsByCourse = new Map(
+    getRefundsByCourse(instructorId, range).map((row) => [row.courseId, row])
+  );
+  const refundOnlyRows = [...refundsByCourse.values()]
+    .filter(
+      (row) => !courseRevenueRows.some((r) => r.courseId === row.courseId)
+    )
     .map((row) => ({
       courseId: row.courseId,
       title: row.title,
-      ...splitRevenue(Number(row.gross ?? 0)),
+      gross: null,
+      purchaseCount: 0,
+    }));
+
+  const courseRevenue = [...courseRevenueRows, ...refundOnlyRows]
+    .map((row) => ({
+      courseId: row.courseId,
+      title: row.title,
+      ...splitRevenue(
+        Number(row.gross ?? 0),
+        refundsByCourse.get(row.courseId)?.refundsCents ?? 0
+      ),
       purchaseCount: row.purchaseCount,
     }))
     .sort((a, b) => b.grossCents - a.grossCents);
@@ -1439,7 +1502,7 @@ function RevenueByCountry({ breakdown }: { breakdown: CourseCountryRevenue }) {
             invisible, though it directly sets what the instructor earns — so
             the figure is stated in net, the money they actually keep. */}
         {formatMoney(breakdown.discountedNetCents)} of your{" "}
-        {formatMoney(breakdown.netCents)} net earnings (
+        {formatMoney(breakdown.netCents)} net revenue (
         {breakdown.discountedSharePercent}%) came from countries with a parity
         discount. Averages are what a sale there actually fetched — list prices
         change and are not kept, so no discount is reconstructed per purchase.
@@ -1554,7 +1617,7 @@ export default function InstructorAnalytics({
           <p className="mt-1 text-muted-foreground">
             {isAdmin && instructorId === null
               ? "Revenue across every instructor on the platform."
-              : "Revenue and earnings for your courses."}
+              : "Revenue for your courses."}
           </p>
         </div>
 
@@ -1631,7 +1694,7 @@ export default function InstructorAnalytics({
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6">
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <MoneyCard
                 label="Gross revenue"
                 amountCents={summary.grossCents}
@@ -1640,14 +1703,19 @@ export default function InstructorAnalytics({
                 }.`}
               />
               <MoneyCard
-                label={`Platform fee (${PLATFORM_FEE_PERCENT}%)`}
-                amountCents={summary.feeCents}
-                hint="Cadence's cut. Already deducted from your earnings."
+                label="Refunds"
+                amountCents={summary.refundsCents}
+                hint="Refunds approved in this period, whenever the sale was."
               />
               <MoneyCard
-                label="Your net earnings"
+                label={`Platform fee (${PLATFORM_FEE_PERCENT}%)`}
+                amountCents={summary.feeCents}
+                hint="Cadence's cut of what you kept after refunds."
+              />
+              <MoneyCard
+                label="Your net revenue"
                 amountCents={summary.netCents}
-                hint="What you keep — gross revenue minus the platform fee."
+                hint="What you keep — gross revenue minus refunds and the platform fee."
                 emphasis
               />
             </div>
@@ -1849,6 +1917,7 @@ export default function InstructorAnalytics({
                         <th className="pb-2 font-medium">Course</th>
                         <th className="pb-2 text-right font-medium">Sales</th>
                         <th className="pb-2 text-right font-medium">Gross</th>
+                        <th className="pb-2 text-right font-medium">Refunds</th>
                         <th className="pb-2 text-right font-medium">
                           Fee ({PLATFORM_FEE_PERCENT}%)
                         </th>
@@ -1864,6 +1933,9 @@ export default function InstructorAnalytics({
                           </td>
                           <td className="py-3 text-right tabular-nums">
                             {formatMoney(course.grossCents)}
+                          </td>
+                          <td className="py-3 text-right tabular-nums text-muted-foreground">
+                            {formatMoney(course.refundsCents)}
                           </td>
                           <td className="py-3 text-right tabular-nums text-muted-foreground">
                             {formatMoney(course.feeCents)}
@@ -1896,7 +1968,8 @@ export function HydrateFallback() {
         <Skeleton className="h-9 w-40" />
       </div>
       <Skeleton className="mb-4 h-9 w-64" />
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Skeleton className="h-32 w-full" />
         <Skeleton className="h-32 w-full" />
         <Skeleton className="h-32 w-full" />
         <Skeleton className="h-32 w-full" />
