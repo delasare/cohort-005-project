@@ -106,7 +106,7 @@ export async function action({ params, request }: Route.ActionArgs) {
     throw data("User not found", { status: 404 });
   }
 
-  const eligibility = checkRefundEligibility(currentUserId, course);
+  const eligibility = checkRefundEligibility(currentUserId, course.id);
 
   if (!eligibility.eligible) {
     const { message, status } = INELIGIBLE_RESPONSES[eligibility.reason];

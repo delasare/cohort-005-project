@@ -26,15 +26,15 @@ let studentId: number;
 let course: { id: number; price: number };
 let lessonIds: number[];
 
-function purchase(createdAt = PURCHASED_AT) {
+function purchase({ amountPaid = PRICE } = {}) {
   return testDb
     .insert(schema.purchases)
     .values({
       userId: studentId,
       courseId: course.id,
-      amountPaid: PRICE,
+      amountPaid,
       country: null,
-      createdAt: createdAt.toISOString(),
+      createdAt: PURCHASED_AT.toISOString(),
     })
     .returning()
     .get();
@@ -97,19 +97,37 @@ describe("checkRefundEligibility", () => {
   it("offers the request inside the window, with the last day of the window", () => {
     const bought = purchase();
 
-    expect(checkRefundEligibility(studentId, course, DURING_WINDOW)).toEqual({
+    expect(checkRefundEligibility(studentId, course.id, DURING_WINDOW)).toEqual(
+      {
+        eligible: true,
+        purchaseId: bought.id,
+        amount: PRICE,
+        lastDayInWindow: "2026-11-15",
+      }
+    );
+  });
+
+  it("gives back what the student paid, not the course's list price", () => {
+    // Bought at a discount that was not a purchasing-power price, such as
+    // before a price rise. Handing back the list price would pay out more
+    // than was ever paid.
+    purchase({ amountPaid: 5900 });
+
+    expect(
+      checkRefundEligibility(studentId, course.id, DURING_WINDOW)
+    ).toMatchObject({
       eligible: true,
-      purchaseId: bought.id,
-      amount: PRICE,
-      lastDayInWindow: "2026-11-15",
+      amount: 5900,
     });
   });
 
   it("refuses a student who has not bought the course", () => {
-    expect(checkRefundEligibility(studentId, course, DURING_WINDOW)).toEqual({
-      eligible: false,
-      reason: "no-purchase",
-    });
+    expect(checkRefundEligibility(studentId, course.id, DURING_WINDOW)).toEqual(
+      {
+        eligible: false,
+        reason: "no-purchase",
+      }
+    );
   });
 
   it("refuses a second request while one is still open", () => {
@@ -119,10 +137,12 @@ describe("checkRefundEligibility", () => {
       .values({ purchaseId: bought.id, reason: "Not what I expected" })
       .run();
 
-    expect(checkRefundEligibility(studentId, course, DURING_WINDOW)).toEqual({
-      eligible: false,
-      reason: "request-open",
-    });
+    expect(checkRefundEligibility(studentId, course.id, DURING_WINDOW)).toEqual(
+      {
+        eligible: false,
+        reason: "request-open",
+      }
+    );
   });
 
   it("refuses a claimed team seat", () => {
@@ -140,10 +160,12 @@ describe("checkRefundEligibility", () => {
       })
       .run();
 
-    expect(checkRefundEligibility(studentId, course, DURING_WINDOW)).toEqual({
-      eligible: false,
-      reason: "claimed-seat",
-    });
+    expect(checkRefundEligibility(studentId, course.id, DURING_WINDOW)).toEqual(
+      {
+        eligible: false,
+        reason: "claimed-seat",
+      }
+    );
   });
 
   describe("the Refund Window", () => {
@@ -152,7 +174,7 @@ describe("checkRefundEligibility", () => {
 
       const lateOnLastDay = new Date(2026, 10, 15, 23, 59);
       expect(
-        checkRefundEligibility(studentId, course, lateOnLastDay)
+        checkRefundEligibility(studentId, course.id, lateOnLastDay)
       ).toMatchObject({
         eligible: true,
       });
@@ -162,7 +184,7 @@ describe("checkRefundEligibility", () => {
       purchase();
 
       const dayAfter = new Date(2026, 10, 16, 0, 1);
-      expect(checkRefundEligibility(studentId, course, dayAfter)).toEqual({
+      expect(checkRefundEligibility(studentId, course.id, dayAfter)).toEqual({
         eligible: false,
         reason: "window-closed",
       });
@@ -175,7 +197,7 @@ describe("checkRefundEligibility", () => {
       completeLessons(1);
 
       expect(
-        checkRefundEligibility(studentId, course, DURING_WINDOW)
+        checkRefundEligibility(studentId, course.id, DURING_WINDOW)
       ).toMatchObject({
         eligible: true,
       });
@@ -185,7 +207,9 @@ describe("checkRefundEligibility", () => {
       purchase();
       completeLessons(2);
 
-      expect(checkRefundEligibility(studentId, course, DURING_WINDOW)).toEqual({
+      expect(
+        checkRefundEligibility(studentId, course.id, DURING_WINDOW)
+      ).toEqual({
         eligible: false,
         reason: "too-much-completed",
       });
@@ -201,7 +225,7 @@ describe("checkRefundEligibility", () => {
       watch(lessonIds[0], 3000);
 
       expect(
-        checkRefundEligibility(studentId, course, DURING_WINDOW)
+        checkRefundEligibility(studentId, course.id, DURING_WINDOW)
       ).toMatchObject({
         eligible: true,
       });
@@ -212,7 +236,9 @@ describe("checkRefundEligibility", () => {
       watch(lessonIds[0], REFUND_WATCH_LIMIT_SECONDS / 2);
       watch(lessonIds[1], REFUND_WATCH_LIMIT_SECONDS / 2);
 
-      expect(checkRefundEligibility(studentId, course, DURING_WINDOW)).toEqual({
+      expect(
+        checkRefundEligibility(studentId, course.id, DURING_WINDOW)
+      ).toEqual({
         eligible: false,
         reason: "too-much-watched",
       });

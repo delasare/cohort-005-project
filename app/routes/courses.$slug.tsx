@@ -400,10 +400,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     enrolled = isUserEnrolled(currentUserId, course.id);
 
     if (enrolled) {
-      const eligibility = checkRefundEligibility(currentUserId, {
-        id: course.id,
-        price: courseWithDetails.price,
-      });
+      const eligibility = checkRefundEligibility(currentUserId, course.id);
       if (eligibility.eligible) {
         refundOffer = {
           amount: eligibility.amount,
