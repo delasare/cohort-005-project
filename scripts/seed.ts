@@ -2279,7 +2279,7 @@ This course is still in draft while the cluster examples are rewritten against t
   console.log(`Created ${countRows(schema.purchases)} individual purchases.`);
 
   // ─── Teams, Team Members, and Coupons ───
-  // Bossy McBossface bought 5 team seats for course 2; Olivia and Liam redeemed coupons
+  // Bossy McBossface bought 5 team seats for course 2; Olivia and Liam claimed Seats
 
   const [team1] = db
     .insert(schema.teams)
@@ -2353,7 +2353,7 @@ This course is still in draft while the cluster examples are rewritten against t
     .run();
 
   console.log(
-    `Created 1 team with Bossy McBossface as admin, 1 team purchase, and ${seededCoupons.length} coupons (${countRows(schema.coupons, isNotNull(schema.coupons.redeemedByUserId))} redeemed, ${countRows(schema.coupons, isNull(schema.coupons.redeemedByUserId))} available).`
+    `Created 1 team with Bossy McBossface as Team Manager, 1 Team Purchase, and ${seededCoupons.length} Seats (${countRows(schema.coupons, isNotNull(schema.coupons.redeemedByUserId))} claimed, ${countRows(schema.coupons, isNull(schema.coupons.redeemedByUserId))} available).`
   );
 
   // ─── Generated history ───
@@ -2609,7 +2609,7 @@ This course is still in draft while the cluster examples are rewritten against t
   // ─── Further team purchases ───
   // Two more seat purchases so team revenue is not a single row, in mixed
   // redemption states: one team most of the way through its seats, one that has
-  // bought and redeemed nothing yet.
+  // bought and claimed nothing yet.
 
   function createTeamPurchase(
     adminEmail: string,
