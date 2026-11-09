@@ -169,7 +169,9 @@ describe("checkRefundEligibility", () => {
     });
   });
 
-  it("refuses a claimed team seat", () => {
+  it("refuses a team purchase, even with no seat claimed", () => {
+    // Team seats are not refunded through a Refund Request. Without this, an
+    // approved request would leave the unclaimed seats redeemable.
     const bought = purchase();
     const team = testDb.insert(schema.teams).values({}).returning().get();
     testDb
@@ -179,15 +181,13 @@ describe("checkRefundEligibility", () => {
         courseId: course.id,
         code: "SEAT-1",
         purchaseId: bought.id,
-        redeemedByUserId: studentId,
-        redeemedAt: PURCHASED_AT.toISOString(),
       })
       .run();
 
     expect(checkRefundEligibility(studentId, course.id, DURING_WINDOW)).toEqual(
       {
         eligible: false,
-        reason: "claimed-seat",
+        reason: "team-purchase",
       }
     );
   });

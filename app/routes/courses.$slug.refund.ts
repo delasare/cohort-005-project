@@ -22,8 +22,8 @@ const INELIGIBLE_RESPONSES: Record<
     message: "You have already made a refund request on this purchase.",
     status: 409,
   },
-  "claimed-seat": {
-    message: "A claimed team seat cannot be refunded.",
+  "team-purchase": {
+    message: "Team seats cannot be refunded through a refund request.",
     status: 403,
   },
   "window-closed": {

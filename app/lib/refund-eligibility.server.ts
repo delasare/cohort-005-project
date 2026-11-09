@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "~/db";
 import {
   coupons,
@@ -18,7 +18,7 @@ export const REFUND_COMPLETION_LIMIT = 0.5;
 export type RefundIneligibility =
   | "no-purchase"
   | "already-requested"
-  | "claimed-seat"
+  | "team-purchase"
   | "window-closed"
   | "too-much-completed"
   | "too-much-watched";
@@ -53,18 +53,16 @@ function hasRefundRequest(purchaseId: number) {
   return existing !== undefined;
 }
 
-// A seat that came out of a team licence, and has been claimed, belongs to
-// the team — the student cannot hand it back on their own.
-function isClaimedSeat(purchaseId: number) {
-  const claimed = db
+// A purchase of team seats is not refunded through a Refund Request: the
+// seats belong to the team, and some may already be claimed.
+function isTeamPurchase(purchaseId: number) {
+  const seat = db
     .select({ id: coupons.id })
     .from(coupons)
-    .where(
-      and(eq(coupons.purchaseId, purchaseId), isNotNull(coupons.redeemedAt))
-    )
+    .where(eq(coupons.purchaseId, purchaseId))
     .get();
 
-  return claimed !== undefined;
+  return seat !== undefined;
 }
 
 function getLessonIdsForCourse(courseId: number): number[] {
@@ -142,8 +140,8 @@ export function checkRefundEligibility(
     return { eligible: false, reason: "already-requested" };
   }
 
-  if (isClaimedSeat(purchase.id)) {
-    return { eligible: false, reason: "claimed-seat" };
+  if (isTeamPurchase(purchase.id)) {
+    return { eligible: false, reason: "team-purchase" };
   }
 
   const windowEnd = new Date(purchase.createdAt);
