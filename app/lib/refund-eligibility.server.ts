@@ -1,0 +1,185 @@
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { db } from "~/db";
+import {
+  coupons,
+  lessonProgress,
+  lessons,
+  modules,
+  purchases,
+  refunds,
+  videoWatchEvents,
+  LessonProgressStatus,
+  RefundStatus,
+} from "~/db/schema";
+import { getDiscountForCountry } from "~/lib/ppp";
+
+export const REFUND_WINDOW_DAYS = 14;
+export const REFUND_WATCH_LIMIT_SECONDS = 2 * 60 * 60;
+export const REFUND_COMPLETION_LIMIT = 0.5;
+
+export type RefundIneligibility =
+  | "no-purchase"
+  | "request-open"
+  | "claimed-seat"
+  | "window-closed"
+  | "too-much-completed"
+  | "too-much-watched";
+
+export type RefundEligibility =
+  | {
+      eligible: true;
+      purchaseId: number;
+      amount: number;
+      lastDayInWindow: string;
+    }
+  | { eligible: false; reason: RefundIneligibility };
+
+function getLatestPurchase(userId: number, courseId: number) {
+  return db
+    .select()
+    .from(purchases)
+    .where(and(eq(purchases.userId, userId), eq(purchases.courseId, courseId)))
+    .orderBy(sql`${purchases.createdAt} desc`)
+    .get();
+}
+
+function hasOpenRefundRequest(purchaseId: number) {
+  const open = db
+    .select({ id: refunds.id })
+    .from(refunds)
+    .where(
+      and(
+        eq(refunds.purchaseId, purchaseId),
+        eq(refunds.status, RefundStatus.Requested)
+      )
+    )
+    .get();
+
+  return open !== undefined;
+}
+
+// A seat that came out of a team licence, and has been claimed, belongs to
+// the team — the student cannot hand it back on their own.
+function isClaimedSeat(purchaseId: number) {
+  const claimed = db
+    .select({ id: coupons.id })
+    .from(coupons)
+    .where(
+      and(eq(coupons.purchaseId, purchaseId), isNotNull(coupons.redeemedAt))
+    )
+    .get();
+
+  return claimed !== undefined;
+}
+
+function getLessonIdsForCourse(courseId: number): number[] {
+  return db
+    .select({ id: lessons.id })
+    .from(lessons)
+    .innerJoin(modules, eq(lessons.moduleId, modules.id))
+    .where(eq(modules.courseId, courseId))
+    .all()
+    .map((row) => row.id);
+}
+
+function getCompletedLessonCount(userId: number, lessonIds: number[]) {
+  if (lessonIds.length === 0) return 0;
+
+  const result = db
+    .select({ count: sql<number>`count(*)` })
+    .from(lessonProgress)
+    .where(
+      and(
+        eq(lessonProgress.userId, userId),
+        eq(lessonProgress.status, LessonProgressStatus.Completed),
+        inArray(lessonProgress.lessonId, lessonIds)
+      )
+    )
+    .get();
+
+  return result?.count ?? 0;
+}
+
+function getSecondsWatched(userId: number, lessonIds: number[]) {
+  if (lessonIds.length === 0) return 0;
+
+  const furthestPerLesson = db
+    .select({
+      furthest: sql<number>`max(${videoWatchEvents.positionSeconds})`,
+    })
+    .from(videoWatchEvents)
+    .where(
+      and(
+        eq(videoWatchEvents.userId, userId),
+        inArray(videoWatchEvents.lessonId, lessonIds)
+      )
+    )
+    .groupBy(videoWatchEvents.lessonId)
+    .all();
+
+  return furthestPerLesson.reduce((total, row) => total + row.furthest, 0);
+}
+
+// The fourteen-day window is counted in whole days, not hours — someone who
+// buys at 23:00 should still get the whole of their fourteenth day.
+function calendarDay(when: Date): string {
+  const month = String(when.getMonth() + 1).padStart(2, "0");
+  const day = String(when.getDate()).padStart(2, "0");
+  return `${when.getFullYear()}-${month}-${day}`;
+}
+
+/**
+ * Whether a student may make a Refund Request on their latest Purchase of a
+ * course, checking every rule of Refund Eligibility. The course page uses it
+ * to decide whether to offer the request, and the refund action uses it to
+ * decide whether to accept one, so the two cannot disagree.
+ */
+export function checkRefundEligibility(
+  userId: number,
+  course: { id: number; price: number },
+  now: Date = new Date()
+): RefundEligibility {
+  const purchase = getLatestPurchase(userId, course.id);
+
+  if (!purchase) return { eligible: false, reason: "no-purchase" };
+
+  if (hasOpenRefundRequest(purchase.id)) {
+    return { eligible: false, reason: "request-open" };
+  }
+
+  if (isClaimedSeat(purchase.id)) {
+    return { eligible: false, reason: "claimed-seat" };
+  }
+
+  const windowEnd = new Date(purchase.createdAt);
+  windowEnd.setDate(windowEnd.getDate() + REFUND_WINDOW_DAYS);
+  const lastDayInWindow = calendarDay(windowEnd);
+  const today = calendarDay(now);
+
+  if (
+    today < calendarDay(new Date(purchase.createdAt)) ||
+    today > lastDayInWindow
+  ) {
+    return { eligible: false, reason: "window-closed" };
+  }
+
+  const lessonIds = getLessonIdsForCourse(course.id);
+
+  if (lessonIds.length > 0) {
+    const completedCount = getCompletedLessonCount(userId, lessonIds);
+    if (completedCount / lessonIds.length >= REFUND_COMPLETION_LIMIT) {
+      return { eligible: false, reason: "too-much-completed" };
+    }
+  }
+
+  if (getSecondsWatched(userId, lessonIds) >= REFUND_WATCH_LIMIT_SECONDS) {
+    return { eligible: false, reason: "too-much-watched" };
+  }
+
+  // A purchasing-power price is given back at the price that was paid, not at
+  // the list price of the course.
+  const pppDiscount = getDiscountForCountry(purchase.country);
+  const amount = pppDiscount > 0 ? purchase.amountPaid : course.price;
+
+  return { eligible: true, purchaseId: purchase.id, amount, lastDayInWindow };
+}
