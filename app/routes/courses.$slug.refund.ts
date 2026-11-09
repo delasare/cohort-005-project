@@ -18,8 +18,8 @@ const INELIGIBLE_RESPONSES: Record<
   { message: string; status: number }
 > = {
   "no-purchase": { message: "You have not bought this course.", status: 403 },
-  "request-open": {
-    message: "You already have a request open on this purchase.",
+  "already-requested": {
+    message: "You have already made a refund request on this purchase.",
     status: 409,
   },
   "claimed-seat": {

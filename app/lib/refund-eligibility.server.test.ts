@@ -130,19 +130,43 @@ describe("checkRefundEligibility", () => {
     );
   });
 
-  it("refuses a second request while one is still open", () => {
-    const bought = purchase();
-    testDb
-      .insert(schema.refunds)
-      .values({ purchaseId: bought.id, reason: "Not what I expected" })
-      .run();
+  describe("one Refund Request per Purchase", () => {
+    function requestRefund(status: schema.RefundStatus) {
+      const bought = purchase();
+      testDb
+        .insert(schema.refunds)
+        .values({
+          purchaseId: bought.id,
+          status,
+          reason: "Not what I expected",
+        })
+        .run();
+    }
 
-    expect(checkRefundEligibility(studentId, course.id, DURING_WINDOW)).toEqual(
-      {
-        eligible: false,
-        reason: "request-open",
-      }
-    );
+    it("refuses a second request while one is still open", () => {
+      requestRefund(schema.RefundStatus.Requested);
+
+      expect(
+        checkRefundEligibility(studentId, course.id, DURING_WINDOW)
+      ).toEqual({ eligible: false, reason: "already-requested" });
+    });
+
+    it("refuses a new request once one has been declined", () => {
+      // A decline is final. Otherwise it only means "ask again tomorrow".
+      requestRefund(schema.RefundStatus.Declined);
+
+      expect(
+        checkRefundEligibility(studentId, course.id, DURING_WINDOW)
+      ).toEqual({ eligible: false, reason: "already-requested" });
+    });
+
+    it("refuses a new request once one has been approved", () => {
+      requestRefund(schema.RefundStatus.Approved);
+
+      expect(
+        checkRefundEligibility(studentId, course.id, DURING_WINDOW)
+      ).toEqual({ eligible: false, reason: "already-requested" });
+    });
   });
 
   it("refuses a claimed team seat", () => {
