@@ -11,7 +11,6 @@ import {
   LessonProgressStatus,
   RefundStatus,
 } from "~/db/schema";
-import { getDiscountForCountry } from "~/lib/ppp";
 
 export const REFUND_WINDOW_DAYS = 14;
 export const REFUND_WATCH_LIMIT_SECONDS = 2 * 60 * 60;
@@ -136,10 +135,10 @@ function calendarDay(when: Date): string {
  */
 export function checkRefundEligibility(
   userId: number,
-  course: { id: number; price: number },
+  courseId: number,
   now: Date = new Date()
 ): RefundEligibility {
-  const purchase = getLatestPurchase(userId, course.id);
+  const purchase = getLatestPurchase(userId, courseId);
 
   if (!purchase) return { eligible: false, reason: "no-purchase" };
 
@@ -163,7 +162,7 @@ export function checkRefundEligibility(
     return { eligible: false, reason: "window-closed" };
   }
 
-  const lessonIds = getLessonIdsForCourse(course.id);
+  const lessonIds = getLessonIdsForCourse(courseId);
 
   if (lessonIds.length > 0) {
     const completedCount = getCompletedLessonCount(userId, lessonIds);
@@ -176,10 +175,12 @@ export function checkRefundEligibility(
     return { eligible: false, reason: "too-much-watched" };
   }
 
-  // A purchasing-power price is given back at the price that was paid, not at
-  // the list price of the course.
-  const pppDiscount = getDiscountForCountry(purchase.country);
-  const amount = pppDiscount > 0 ? purchase.amountPaid : course.price;
-
-  return { eligible: true, purchaseId: purchase.id, amount, lastDayInWindow };
+  // The Refund Amount is what the student actually paid — never the list
+  // price, which may have risen since, or been discounted at the time.
+  return {
+    eligible: true,
+    purchaseId: purchase.id,
+    amount: purchase.amountPaid,
+    lastDayInWindow,
+  };
 }
