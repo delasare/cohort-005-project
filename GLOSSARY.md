@@ -1,14 +1,14 @@
 # Cadence
 
-An online course platform where Learners buy courses and work through their lessons.
+An online course platform where Students buy courses and work through their lessons.
 
 ## Language
 
 ### People
 
-**Learner**:
+**Student**:
 Someone who buys courses and works through their lessons.
-_Avoid_: Student
+_Avoid_: Learner
 
 **Admin**:
 A Cadence staff member who runs the platform, including resolving Refund Requests.
@@ -16,18 +16,18 @@ A Cadence staff member who runs the platform, including resolving Refund Request
 ### Refunds
 
 **Purchase**:
-A Learner's payment for one course.
+A Student's payment for one course.
 
 **Refund Request**:
-A Learner's ask to get their money back on a Purchase. It is Requested until an Admin approves or declines it, and a Purchase may have at most one.
+A Student's ask to get their money back on a Purchase. It is Requested until an Admin approves or declines it, and a Purchase may have at most one.
 _Avoid_: Refund (for the ask itself), Cancellation, Cancel my purchase, Reversal, Chargeback
 
 **Refund**:
-Money returned to a Learner when their Refund Request is approved; the Learner loses access to the course.
+Money returned to a Student when their Refund Request is approved; the Student loses access to the course.
 _Avoid_: Reversal, Chargeback
 
 **Refund Amount**:
-What a Learner gets back on a Refund: always the amount they actually paid for the Purchase, never the course's list price.
+What a Student gets back on a Refund: always the amount they actually paid for the Purchase, never the course's list price.
 
 **Refund Window**:
 The fourteen calendar days, counted from the day of the Purchase, during which a Refund Request may be made.
