@@ -9,7 +9,6 @@ import {
   refunds,
   videoWatchEvents,
   LessonProgressStatus,
-  RefundStatus,
 } from "~/db/schema";
 
 export const REFUND_WINDOW_DAYS = 14;
@@ -18,7 +17,7 @@ export const REFUND_COMPLETION_LIMIT = 0.5;
 
 export type RefundIneligibility =
   | "no-purchase"
-  | "request-open"
+  | "already-requested"
   | "claimed-seat"
   | "window-closed"
   | "too-much-completed"
@@ -42,19 +41,16 @@ function getLatestPurchase(userId: number, courseId: number) {
     .get();
 }
 
-function hasOpenRefundRequest(purchaseId: number) {
-  const open = db
+// A Purchase gets one Refund Request, whatever became of it: a decline is
+// final, and an approval has already given the money back.
+function hasRefundRequest(purchaseId: number) {
+  const existing = db
     .select({ id: refunds.id })
     .from(refunds)
-    .where(
-      and(
-        eq(refunds.purchaseId, purchaseId),
-        eq(refunds.status, RefundStatus.Requested)
-      )
-    )
+    .where(eq(refunds.purchaseId, purchaseId))
     .get();
 
-  return open !== undefined;
+  return existing !== undefined;
 }
 
 // A seat that came out of a team licence, and has been claimed, belongs to
@@ -142,8 +138,8 @@ export function checkRefundEligibility(
 
   if (!purchase) return { eligible: false, reason: "no-purchase" };
 
-  if (hasOpenRefundRequest(purchase.id)) {
-    return { eligible: false, reason: "request-open" };
+  if (hasRefundRequest(purchase.id)) {
+    return { eligible: false, reason: "already-requested" };
   }
 
   if (isClaimedSeat(purchase.id)) {
