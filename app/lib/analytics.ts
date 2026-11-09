@@ -69,13 +69,15 @@ const MONTHS = [
 /**
  * Cents as money — always with the cents shown, and always with a currency
  * symbol. Deliberately not `formatPrice`, which renders 0 as "Free": a day
- * with no sales is $0.00, not free.
+ * with no sales is $0.00, not free. Money leaving, such as Net Revenue in a
+ * period of Refunds, reads "-$63.20".
  */
 export function formatMoney(cents: number): string {
-  return `$${(cents / 100).toLocaleString("en-US", {
+  const amount = (Math.abs(cents) / 100).toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  })}`;
+  });
+  return `${cents < 0 ? "-" : ""}$${amount}`;
 }
 
 /**
@@ -92,12 +94,22 @@ export function formatBucket(bucket: string): string {
 }
 
 /**
- * Splits gross revenue into the platform's fee and the instructor's net.
+ * Splits Gross Revenue into Refunds, the Platform Fee and the instructor's
+ * Net Revenue. The fee is taken on what is kept after Refunds, so a Refund
+ * hands back the platform's share as well as the instructor's. A period whose
+ * Refunds outweigh its sales comes out negative, and that is shown as is.
  *
- * Net is gross minus the rounded fee rather than a second independent
- * rounding, so the three figures always add up on screen.
+ * Net is what is kept minus the rounded fee rather than a second independent
+ * rounding, so the figures always add up on screen.
  */
-export function splitRevenue(grossCents: number) {
-  const feeCents = Math.round(grossCents * PLATFORM_FEE_RATE);
-  return { grossCents, feeCents, netCents: grossCents - feeCents };
+export function splitRevenue(grossCents: number, refundsCents = 0) {
+  const keptCents = grossCents - refundsCents;
+  // `|| 0` turns the -0 that rounding a small negative gives into 0.
+  const feeCents = Math.round(keptCents * PLATFORM_FEE_RATE) || 0;
+  return {
+    grossCents,
+    refundsCents,
+    feeCents,
+    netCents: keptCents - feeCents,
+  };
 }

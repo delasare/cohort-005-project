@@ -55,6 +55,7 @@ describe("analytics config", () => {
     it("splits a round amount into fee and net", () => {
       expect(splitRevenue(10000)).toEqual({
         grossCents: 10000,
+        refundsCents: 0,
         feeCents: 2000,
         netCents: 8000,
       });
@@ -72,9 +73,42 @@ describe("analytics config", () => {
     it("splits zero into zeroes", () => {
       expect(splitRevenue(0)).toEqual({
         grossCents: 0,
+        refundsCents: 0,
         feeCents: 0,
         netCents: 0,
       });
+    });
+
+    it("takes the fee on what is kept after Refunds, so a Refund returns the fee too", () => {
+      expect(splitRevenue(10000, 2500)).toEqual({
+        grossCents: 10000,
+        refundsCents: 2500,
+        feeCents: 1500,
+        netCents: 6000,
+      });
+    });
+
+    it("goes negative when Refunds outweigh the period's sales", () => {
+      // A Refund counts on the day it is approved, so a quiet week can hold a
+      // Refund on an older sale. The page shows the money leaving.
+      expect(splitRevenue(0, 7900)).toEqual({
+        grossCents: 0,
+        refundsCents: 7900,
+        feeCents: -1580,
+        netCents: -6320,
+      });
+    });
+
+    it("keeps fee and net adding up to what is kept, refunds included", () => {
+      for (const [gross, refunds] of [
+        [3, 1],
+        [3333, 7],
+        [0, 3],
+        [1, 99_999],
+      ]) {
+        const { feeCents, netCents } = splitRevenue(gross, refunds);
+        expect(feeCents + netCents).toBe(gross - refunds);
+      }
     });
   });
 
@@ -126,6 +160,12 @@ describe("analytics config", () => {
 
     it("groups thousands", () => {
       expect(formatMoney(123_456_789)).toBe("$1,234,567.89");
+    });
+
+    it("puts the sign before the currency symbol for money leaving", () => {
+      // A period whose Refunds outweigh its sales has negative Net Revenue.
+      expect(formatMoney(-6320)).toBe("-$63.20");
+      expect(formatMoney(-123_456_789)).toBe("-$1,234,567.89");
     });
   });
 

@@ -23,7 +23,7 @@ A Student's ask to get their money back on a Purchase. It is Requested until an 
 _Avoid_: Refund (for the ask itself), Cancellation, Cancel my purchase, Reversal, Chargeback
 
 **Refund**:
-Money returned to a Student when their Refund Request is approved; the Student loses access to the course.
+Money returned to a Student when their Refund Request is approved; the Student loses access to the course. It counts on the day it is approved, not the day of the Purchase.
 _Avoid_: Reversal, Chargeback
 
 **Refund Amount**:
@@ -37,6 +37,19 @@ The full set of rules a Purchase must pass before a Refund Request may be made: 
 
 **Chargeback**:
 A payment dispute the cardholder raises through their bank. It is not a Refund Request and is not modelled in Cadence.
+
+### Revenue
+
+**Gross Revenue**:
+Everything paid for an Instructor's courses in a period, before Refunds.
+_Avoid_: Sales (as a total), Revenue (unqualified)
+
+**Platform Fee**:
+Cadence's twenty percent share of Gross Revenue minus Refunds. A Refund reduces it too.
+
+**Net Revenue**:
+What the Instructor keeps: Gross Revenue minus Refunds minus the Platform Fee. It can be negative for a period whose Refunds outweigh its sales.
+_Avoid_: Earnings, payout
 
 ### Teams
 
