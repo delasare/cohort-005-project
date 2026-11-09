@@ -37,6 +37,7 @@ export enum RefundStatus {
   Declined = "declined",
 }
 
+// "admin" is the Team Manager in GLOSSARY.md — not a Cadence Admin.
 export enum TeamMemberRole {
   Admin = "admin",
   Member = "member",
@@ -274,6 +275,8 @@ export const teamMembers = sqliteTable("team_members", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+// Each row is one Seat (see GLOSSARY.md): `code` is its Seat Code, and
+// "redeemed" means the Seat has been claimed.
 export const coupons = sqliteTable("coupons", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   teamId: integer("team_id")
