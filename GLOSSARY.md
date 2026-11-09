@@ -33,7 +33,7 @@ What a Student gets back on a Refund: always the amount they actually paid for t
 The fourteen calendar days, counted from the day of the Purchase, during which a Refund Request may be made.
 
 **Refund Eligibility**:
-The full set of rules a Purchase must pass before a Refund Request may be made: inside the Refund Window, under two hours watched, under half the lessons completed, and not a claimed team seat.
+The full set of rules a Purchase must pass before a Refund Request may be made: inside the Refund Window, under two hours watched, under half the lessons completed, and not a purchase of team seats.
 
 **Chargeback**:
 A payment dispute the cardholder raises through their bank. It is not a Refund Request and is not modelled in Cadence.
