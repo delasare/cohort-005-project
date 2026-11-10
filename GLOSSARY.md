@@ -26,6 +26,9 @@ _Avoid_: Refund (for the ask itself), Cancellation, Cancel my purchase, Reversal
 Money returned to a Student when their Refund Request is approved; the Student loses access to the course. It counts on the day it is approved, not the day of the Purchase.
 _Avoid_: Reversal, Chargeback
 
+**Decline Reason**:
+The Admin's explanation, shown to the Student, of why their Refund Request was declined.
+
 **Refund Amount**:
 What a Student gets back on a Refund: always the amount they actually paid for the Purchase, never the course's list price.
 
